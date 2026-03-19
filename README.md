@@ -1,2 +1,2 @@
-# CSC-132-Group-3-2026-spring
-the group project for the CSC 132 
+# Hand-Gesture-Controlled-Display
+A gesture-controlled display made with a Raspberry Pi 4 is a system that lets users control what appears on a screen using simple hand movements instead of a keyboard or mouse. A small gesture sensor or camera connected to the Raspberry Pi detects motions like swiping left or right, waving, or hovering a hand. The Raspberry Pi processes these gestures and changes the display—such as switching slides, scrolling through information, or opening menus.
