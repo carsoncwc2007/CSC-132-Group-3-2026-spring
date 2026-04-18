@@ -1,10 +1,11 @@
-
+import time 
 import numpy as np
 import cv2
 import mediapipe as mp
 #importing libraries 
 mp_hands=mp.solutions.hands
 mp_drawing=mp.solutions.drawing_utils
+prev_time=0
 #mediapipe setup
 cap = cv2.VideoCapture(0)
 #opening the webcam
@@ -22,7 +23,10 @@ while True:
         break
     
     frame=cv2.flip(frame,1)
-    
+    current_time=time.time()
+    fps=1/(current_time-prev_time)
+    prev_time=current_time
+    cv2.putText(frame,f'FPS:{int(fps)}',(10,30),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results=hands.process(rgb_frame)
     #annotations the image
