@@ -1,0 +1,55 @@
+for class handDetector()
+
+
+// // A class for detecting and tracking hands in real-time video using MediaPipe
+
+// //     Attributes:
+// //     mode (bool): Determines if the detector will run in video mode (False) or in static image mode (True)
+// //     max_hands (int): The maximum number of hands to detect and track
+// //     detection_con (float): The minimum confidence value for the hand detection to be considered successful
+// //     presence_con (float): The minimum confidence value for the presence of hand landmarks
+// //     track_con (float): The minimum confidence value for hand landmark tracking to be considered successful
+
+// //     Methods:
+// //     find_hands(img, draw=True): Processes an image and optionally draws the hand landmarks
+// //     find_position(img, draw=True): Returns the position of hand landmarks in the image and optionally returns draws the hand landmarks
+
+
+
+            def__init__()
+// 
+//         Initializes the handDetector object with the specified parameters
+
+//         Parameters:
+//         mode (bool): Determines if the detector will run in video mode (False) or in static image mode (True)
+//         max_hands (int): The maximum number of hands to detect and track
+//         detection_con (float): The minimum confidence value for the hand detection to be considered successful
+//         presence_con (float): The minimum confidence value for the presence of hand landmarks
+//         track_con (float): The minimum confidence value for hand landmark tracking to be considered successful
+//        
+
+
+        def find_hands():
+        // Processes an image and optionally draws the landmarks
+
+        // Parameters:
+        // img (ndarray): The input image where hands are detected
+        // draw (bool): Determines whether to draw the hand landmarks (True) or not (False)
+
+        // Returns:
+        // img (ndarray): The input image with or without the hands drawn
+
+
+        def find_positions():
+        // '''
+        Returns the position of hand landmarks in the image and optionally returns draws the hand landmarks
+
+        Parameters:
+        img (ndarray): The input image where hands are detected
+        draw (bool): Determines whether to draw the hand landmarks (True) or not (False)
+
+        Returns:
+        all_landmarks (list): A list of lists containing the id and coordiantes (x, y) of each hand landmark for each hand
+        '''
+
+        
