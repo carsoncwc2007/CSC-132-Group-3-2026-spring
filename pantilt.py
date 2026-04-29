@@ -16,25 +16,26 @@ pan_pwm = GPIO.PWM(PAN_PIN, 50)
 tilt_pwm = GPIO.PWM(TILT_PIN, 50)
 
 NEUTRAL = 7.5
-pan_pwm.start(NEUTRAL)
-tilt_pwm.start(NEUTRAL)
 
-# ---------------- SERVO CONTROL ----------------
+# Start PWM BUT force stop immediately
+pan_pwm.start(0)
+tilt_pwm.start(0)
+
 def stop_all():
     pan_pwm.ChangeDutyCycle(NEUTRAL)
     tilt_pwm.ChangeDutyCycle(NEUTRAL)
 
 def move_left():
-    pan_pwm.ChangeDutyCycle(6.8)
+    pan_pwm.ChangeDutyCycle(6.9)
 
 def move_right():
-    pan_pwm.ChangeDutyCycle(8.2)
+    pan_pwm.ChangeDutyCycle(8.1)
 
 def move_up():
-    tilt_pwm.ChangeDutyCycle(8.2)
+    tilt_pwm.ChangeDutyCycle(8.1)
 
 def move_down():
-    tilt_pwm.ChangeDutyCycle(6.8)
+    tilt_pwm.ChangeDutyCycle(6.9)
 
 # ---------------- FIND CASCADE ----------------
 def get_cascade_path():
@@ -56,13 +57,30 @@ cap = cv2.VideoCapture(0)
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
+# ---------------- STARTUP WARMUP ----------------
+print("[INFO] Camera warming up...")
+start_time = time.time()
+
+while time.time() - start_time < 2:  # 2 second warmup
+    ret, frame = cap.read()
+    if ret:
+        frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+        cv2.imshow("Warming Up Camera...", frame)
+        cv2.waitKey(1)
+
+print("[INFO] Camera ready.")
+
+# Now ensure servos are STOPPED after warmup
+stop_all()
+time.sleep(1)  # extra stabilization
+
 # ---------------- TRACKING VARIABLES ----------------
 prev_x = None
 prev_y = None
 
-MOVE_THRESHOLD = 25     # how much movement triggers servo
-COOLDOWN = 0.15        # seconds between moves
-last_move_time = 0
+MOVE_THRESHOLD = 20
+MOVE_DELAY = 0.6   # delay before reacting to movement
+last_face_time = time.time()
 
 # ---------------- MAIN LOOP ----------------
 try:
@@ -85,40 +103,38 @@ try:
             cv2.rectangle(frame, (x,y), (x+w,y+h), (0,255,0), 2)
             cv2.circle(frame, (face_x, face_y), 5, (0,0,255), -1)
 
-            if prev_x is not None and prev_y is not None:
-                dx = face_x - prev_x
-                dy = face_y - prev_y
+            current_time = time.time()
 
-                current_time = time.time()
+            # Only react AFTER a short delay (prevents instant twitch)
+            if current_time - last_face_time > MOVE_DELAY:
 
-                # Only move if enough time passed (prevents jitter)
-                if current_time - last_move_time > COOLDOWN:
+                if prev_x is not None and prev_y is not None:
+                    dx = face_x - prev_x
+                    dy = face_y - prev_y
 
-                    # -------- PAN (LEFT/RIGHT) --------
+                    # -------- PAN --------
                     if dx > MOVE_THRESHOLD:
                         move_right()
-                        time.sleep(0.05)
-                        pan_pwm.ChangeDutyCycle(NEUTRAL)
+                        time.sleep(0.04)
+                        stop_all()
 
                     elif dx < -MOVE_THRESHOLD:
                         move_left()
-                        time.sleep(0.05)
-                        pan_pwm.ChangeDutyCycle(NEUTRAL)
+                        time.sleep(0.04)
+                        stop_all()
 
-                    # -------- TILT (UP/DOWN) --------
+                    # -------- TILT --------
                     if dy > MOVE_THRESHOLD:
                         move_down()
-                        time.sleep(0.05)
-                        tilt_pwm.ChangeDutyCycle(NEUTRAL)
+                        time.sleep(0.04)
+                        stop_all()
 
                     elif dy < -MOVE_THRESHOLD:
                         move_up()
-                        time.sleep(0.05)
-                        tilt_pwm.ChangeDutyCycle(NEUTRAL)
+                        time.sleep(0.04)
+                        stop_all()
 
-                    last_move_time = current_time
-
-            # Update previous position
+            last_face_time = current_time
             prev_x = face_x
             prev_y = face_y
 
@@ -126,6 +142,7 @@ try:
             stop_all()
             prev_x = None
             prev_y = None
+            last_face_time = time.time()
 
         cv2.imshow("Face Tracking", frame)
 
