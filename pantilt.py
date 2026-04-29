@@ -6,8 +6,8 @@ import os
 # ---------------- GPIO SETUP ----------------
 GPIO.setmode(GPIO.BCM)
 
-PAN_PIN = 17
-TILT_PIN = 27
+PAN_PIN = 6
+TILT_PIN = 16
 
 GPIO.setup(PAN_PIN, GPIO.OUT)
 GPIO.setup(TILT_PIN, GPIO.OUT)
