@@ -6,23 +6,23 @@ import os
 # ---------------- GPIO SETUP ----------------
 GPIO.setmode(GPIO.BCM)
 
-PAN_PIN = 6
-TILT_PIN = 16
+PAN_PIN = 17
+TILT_PIN = 27
 
 GPIO.setup(PAN_PIN, GPIO.OUT)
 GPIO.setup(TILT_PIN, GPIO.OUT)
 
-pan_pwm = GPIO.PWM(PAN_PIN, 50)   # 50Hz
+pan_pwm = GPIO.PWM(PAN_PIN, 50)
 tilt_pwm = GPIO.PWM(TILT_PIN, 50)
 
 NEUTRAL = 7.5
-
 pan_pwm.start(NEUTRAL)
 tilt_pwm.start(NEUTRAL)
 
 # ---------------- SERVO CONTROL ----------------
-def stop_servo(pwm):
-    pwm.ChangeDutyCycle(NEUTRAL)
+def stop_all():
+    pan_pwm.ChangeDutyCycle(NEUTRAL)
+    tilt_pwm.ChangeDutyCycle(NEUTRAL)
 
 def move_left():
     pan_pwm.ChangeDutyCycle(6.8)
@@ -36,41 +36,39 @@ def move_up():
 def move_down():
     tilt_pwm.ChangeDutyCycle(6.8)
 
-# ---------------- FIND CASCADE FILE ----------------
+# ---------------- FIND CASCADE ----------------
 def get_cascade_path():
-    possible_paths = [
+    paths = [
         "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
         "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml",
         os.path.join(os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml")
     ]
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise Exception("Cascade file not found")
 
-    for path in possible_paths:
-        if os.path.exists(path):
-            print(f"[INFO] Using cascade file: {path}")
-            return path
+face_cascade = cv2.CascadeClassifier(get_cascade_path())
 
-    raise Exception("Haar cascade file not found. Install OpenCV properly.")
-
-cascade_path = get_cascade_path()
-face_cascade = cv2.CascadeClassifier(cascade_path)
-
-# ---------------- CAMERA SETUP ----------------
+# ---------------- CAMERA ----------------
 cap = cv2.VideoCapture(0)
 
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-FRAME_CENTER_X = FRAME_WIDTH // 2
-FRAME_CENTER_Y = FRAME_HEIGHT // 2
+# ---------------- TRACKING VARIABLES ----------------
+prev_x = None
+prev_y = None
 
-TOLERANCE = 40  # dead zone to prevent jitter
+MOVE_THRESHOLD = 25     # how much movement triggers servo
+COOLDOWN = 0.15        # seconds between moves
+last_move_time = 0
 
 # ---------------- MAIN LOOP ----------------
 try:
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("Failed to grab frame")
             break
 
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
@@ -79,43 +77,60 @@ try:
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
         if len(faces) > 0:
-            (x, y, w, h) = faces[0]  # track first face
+            (x, y, w, h) = faces[0]
 
             face_x = x + w // 2
             face_y = y + h // 2
 
-            # Draw visuals
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.circle(frame, (face_x, face_y), 5, (0, 0, 255), -1)
-            cv2.circle(frame, (FRAME_CENTER_X, FRAME_CENTER_Y), 5, (255, 0, 0), -1)
+            cv2.rectangle(frame, (x,y), (x+w,y+h), (0,255,0), 2)
+            cv2.circle(frame, (face_x, face_y), 5, (0,0,255), -1)
 
-            # -------- PAN CONTROL --------
-            if face_x < FRAME_CENTER_X - TOLERANCE:
-                move_left()
-            elif face_x > FRAME_CENTER_X + TOLERANCE:
-                move_right()
-            else:
-                stop_servo(pan_pwm)
+            if prev_x is not None and prev_y is not None:
+                dx = face_x - prev_x
+                dy = face_y - prev_y
 
-            # -------- TILT CONTROL --------
-            if face_y < FRAME_CENTER_Y - TOLERANCE:
-                move_up()
-            elif face_y > FRAME_CENTER_Y + TOLERANCE:
-                move_down()
-            else:
-                stop_servo(tilt_pwm)
+                current_time = time.time()
+
+                # Only move if enough time passed (prevents jitter)
+                if current_time - last_move_time > COOLDOWN:
+
+                    # -------- PAN (LEFT/RIGHT) --------
+                    if dx > MOVE_THRESHOLD:
+                        move_right()
+                        time.sleep(0.05)
+                        pan_pwm.ChangeDutyCycle(NEUTRAL)
+
+                    elif dx < -MOVE_THRESHOLD:
+                        move_left()
+                        time.sleep(0.05)
+                        pan_pwm.ChangeDutyCycle(NEUTRAL)
+
+                    # -------- TILT (UP/DOWN) --------
+                    if dy > MOVE_THRESHOLD:
+                        move_down()
+                        time.sleep(0.05)
+                        tilt_pwm.ChangeDutyCycle(NEUTRAL)
+
+                    elif dy < -MOVE_THRESHOLD:
+                        move_up()
+                        time.sleep(0.05)
+                        tilt_pwm.ChangeDutyCycle(NEUTRAL)
+
+                    last_move_time = current_time
+
+            # Update previous position
+            prev_x = face_x
+            prev_y = face_y
 
         else:
-            # No face detected → stop movement
-            stop_servo(pan_pwm)
-            stop_servo(tilt_pwm)
+            stop_all()
+            prev_x = None
+            prev_y = None
 
         cv2.imshow("Face Tracking", frame)
 
-        if cv2.waitKey(1) & 0xFF == 27:  # ESC key
+        if cv2.waitKey(1) & 0xFF == 27:
             break
-
-        time.sleep(0.02)  # smooth movement
 
 # ---------------- CLEANUP ----------------
 finally:
