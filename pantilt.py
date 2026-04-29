@@ -1,7 +1,7 @@
 import cv2
+import mediapipe as mp
 import RPi.GPIO as GPIO
 import time
-import os
 
 # ---------------- GPIO SETUP ----------------
 GPIO.setmode(GPIO.BCM)
@@ -17,7 +17,7 @@ tilt_pwm = GPIO.PWM(TILT_PIN, 50)
 
 NEUTRAL = 7.5
 
-# Start PWM BUT force stop immediately
+# Start safely (no movement)
 pan_pwm.start(0)
 tilt_pwm.start(0)
 
@@ -37,19 +37,9 @@ def move_up():
 def move_down():
     tilt_pwm.ChangeDutyCycle(6.9)
 
-# ---------------- FIND CASCADE ----------------
-def get_cascade_path():
-    paths = [
-        "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
-        "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml",
-        os.path.join(os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml")
-    ]
-    for p in paths:
-        if os.path.exists(p):
-            return p
-    raise Exception("Cascade file not found")
-
-face_cascade = cv2.CascadeClassifier(get_cascade_path())
+# ---------------- MEDIAPIPE SETUP ----------------
+mp_face = mp.solutions.face_detection
+face_detection = mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.6)
 
 # ---------------- CAMERA ----------------
 cap = cv2.VideoCapture(0)
@@ -57,30 +47,31 @@ cap = cv2.VideoCapture(0)
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-# ---------------- STARTUP WARMUP ----------------
-print("[INFO] Camera warming up...")
+# ---------------- CAMERA WARMUP ----------------
+print("[INFO] Warming up camera...")
 start_time = time.time()
 
-while time.time() - start_time < 2:  # 2 second warmup
+while time.time() - start_time < 2:
     ret, frame = cap.read()
     if ret:
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        cv2.imshow("Warming Up Camera...", frame)
+        cv2.imshow("Warming Up...", frame)
         cv2.waitKey(1)
 
-print("[INFO] Camera ready.")
+print("[INFO] Camera ready")
 
-# Now ensure servos are STOPPED after warmup
+# Ensure servos are stopped
 stop_all()
-time.sleep(1)  # extra stabilization
+time.sleep(1)
 
 # ---------------- TRACKING VARIABLES ----------------
 prev_x = None
 prev_y = None
 
-MOVE_THRESHOLD = 20
-MOVE_DELAY = 0.6   # delay before reacting to movement
-last_face_time = time.time()
+MOVE_THRESHOLD = 0.05   # normalized (MediaPipe uses 0–1 coords)
+MOVE_DELAY = 0.6
+
+last_move_time = time.time()
 
 # ---------------- MAIN LOOP ----------------
 try:
@@ -90,27 +81,37 @@ try:
             break
 
         frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        results = face_detection.process(rgb)
 
-        if len(faces) > 0:
-            (x, y, w, h) = faces[0]
+        if results.detections:
+            detection = results.detections[0]
+            bbox = detection.location_data.relative_bounding_box
+
+            # Convert normalized coords to pixels
+            x = int(bbox.xmin * FRAME_WIDTH)
+            y = int(bbox.ymin * FRAME_HEIGHT)
+            w = int(bbox.width * FRAME_WIDTH)
+            h = int(bbox.height * FRAME_HEIGHT)
 
             face_x = x + w // 2
             face_y = y + h // 2
 
+            norm_x = face_x / FRAME_WIDTH
+            norm_y = face_y / FRAME_HEIGHT
+
+            # Draw
             cv2.rectangle(frame, (x,y), (x+w,y+h), (0,255,0), 2)
             cv2.circle(frame, (face_x, face_y), 5, (0,0,255), -1)
 
             current_time = time.time()
 
-            # Only react AFTER a short delay (prevents instant twitch)
-            if current_time - last_face_time > MOVE_DELAY:
+            if current_time - last_move_time > MOVE_DELAY:
 
                 if prev_x is not None and prev_y is not None:
-                    dx = face_x - prev_x
-                    dy = face_y - prev_y
+                    dx = norm_x - prev_x
+                    dy = norm_y - prev_y
 
                     # -------- PAN --------
                     if dx > MOVE_THRESHOLD:
@@ -134,17 +135,18 @@ try:
                         time.sleep(0.04)
                         stop_all()
 
-            last_face_time = current_time
-            prev_x = face_x
-            prev_y = face_y
+                last_move_time = current_time
+
+            prev_x = norm_x
+            prev_y = norm_y
 
         else:
             stop_all()
             prev_x = None
             prev_y = None
-            last_face_time = time.time()
+            last_move_time = time.time()
 
-        cv2.imshow("Face Tracking", frame)
+        cv2.imshow("MediaPipe Face Tracking", frame)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
