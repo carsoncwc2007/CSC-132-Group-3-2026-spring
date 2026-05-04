@@ -2,6 +2,7 @@ import time
 import numpy as np
 import cv2
 import mediapipe as mp
+#importing libraries 
 mp_hands=mp.solutions.hands
 mp_drawing=mp.solutions.drawing_utils
 prev_time=0
