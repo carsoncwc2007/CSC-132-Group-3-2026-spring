@@ -1,16 +1,35 @@
+import time 
 import numpy as np
 import cv2
 import mediapipe as mp
+
+#importing libraries 
 mp_hands=mp.solutions.hands
 mp_drawing=mp.solutions.drawing_utils
+prev_time=0
+#mediapipe setup
 cap = cv2.VideoCapture(0)
-print( "testing")
+#opening the webcam
+hands=mp_hands.Hands(
+static_image_mode=False,
+max_num_hands=2,
+min_detection_confidence=0.5,
+min_tracking_confidence=0.5
+)
+
 while True:
     ret, frame = cap.read()
-    #applies the model
+    if not ret:
+        print("Failed to grab frame")
+        break
     
+    frame=cv2.flip(frame,1)
+    current_time=time.time()
+    fps=1/(current_time-prev_time)
+    prev_time=current_time
+    cv2.putText(frame,f'FPS:{int(fps)}',(10,30),cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),2)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results=mp_hands.Hands().process(frame)
+    results=hands.process(rgb_frame)
     #annotations the image
     cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     if results.multi_hand_landmarks:
