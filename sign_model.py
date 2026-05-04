@@ -74,3 +74,53 @@ class SignLanguageModel:
             if mask.sum()>0:
                 class_accuracy=accuracy_score(y_test[mask],y_pred[mask])
                 print(f"letter {letter}:{class_accuracy:.4f}")
+        #confusion matrix
+        self._plot_confusion_matrix(y_test,y_pred)
+        return accuracy
+    def predict(self,feature_vector):
+        """
+        predict letter from feature vector
+        returns( predicted_letter, confidence)
+        """
+        if self.model is None:
+            raise ValueError("Model not trained yet")
+        feature_vector=np.array(feature_vector).reshape(1,-1)
+        prediction=self.model.predict(feature_vector)[0]
+        probabilities=self.model.predict_proba(feature_vector)[0]
+        confidence=np.max(probabilities)
+        
+        
+        predicted_letter=self.label_decoder[prediction]
+        return predicted_letter, confidence
+    def save_model(Self,filepath='trained_models/sign_classifier.pkl'):
+        """saved trained model """
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        joblib.dump({
+            'model': self.model,
+            'label_encoder': self.label_encoder,
+            'label_decoder': self.label_decoder
+        }, filepath)
+        print(f"model saved to {filepath}")
+    def load_model(self,filepath='trained_models/sign_classifier.pkl'):
+        """load trained model from disk """
+        data=joblib.load(filepath)
+        self.model=data['model']
+        self.label_encoder=data['label_encoder']
+        self.label_decoder=data['label_decoder']
+        print(f"model loaded from {filepath}")
+    def _plot_confusion_matrix(self,y_true,y_pred):
+        cm=confusion_matrix(y_true,y_pred)
+        letters=[self.label_decoder[i] for i in range(len(self.label_decoder))]
+        plt.figure(figsize=(12,10))
+        sns.heatmap(cm,annot=True, fmt='d', cmaop='Blues', xticklabels=letters, yticklabels=letters)
+        plt.title('Confusion Matrix-sign language classifier')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        plt.savefig('trained_models/confusion_matrix.png',dpi=100)
+        print("confusion matrix saved to trained_models/confusion_matrix.png")
+        
+if __name__ == "__main__":
+    model=SignLanguageModel(model_type='random_forest')
+    model.train(gesture_data_dir='gesture_data', test_size=0.2)
+    model.save_model(filepath='trained_models/sign_classifier.pkl')
