@@ -7,8 +7,7 @@ import time
 
 class StablePrediction:
     """
-    Keeps recent predictions and only confirms a letter when it appears consistently.
-    This helps stop the translation from flickering too much.
+    Keeps recent predictions stable so the translation does not flicker too much.
     """
 
     def __init__(self, max_history=15, min_confidence_count=8):
@@ -37,9 +36,10 @@ class StablePrediction:
 
 class MotionTracker:
     """
-    Tracks fingertip movement for motion letters.
-    J uses the pinky fingertip.
-    Z uses the index fingertip.
+    Tracks fingertip movement for J and Z.
+
+    J = pinky draws a J motion
+    Z = index finger draws a Z motion
     """
 
     def __init__(self, max_points=25):
@@ -60,10 +60,6 @@ class MotionTracker:
         self.pinky_path.clear()
 
     def detect_j(self):
-        """
-        Rough J motion:
-        pinky moves downward, then hooks sideways/upward.
-        """
         if len(self.pinky_path) < 12:
             return False
 
@@ -80,10 +76,6 @@ class MotionTracker:
         return moved_down and hooked_sideways and hooked_up
 
     def detect_z(self):
-        """
-        Rough Z motion:
-        index finger moves side, diagonal down, side.
-        """
         if len(self.index_path) < 15:
             return False
 
@@ -114,7 +106,7 @@ class MotionTracker:
 
 class SentenceBuilder:
     """
-    Builds words/sentences by locking in stable letters.
+    Builds a sentence by locking in letters or commands.
     """
 
     def __init__(self, hold_time=1.0, cooldown=1.2):
@@ -134,17 +126,15 @@ class SentenceBuilder:
         if translation in ignored:
             self.current_candidate = None
             self.candidate_start_time = None
-            self.status = "Show a letter"
+            self.status = "Show a letter or command"
             return self.text
 
-        # Start timing a new candidate
         if translation != self.current_candidate:
             self.current_candidate = translation
             self.candidate_start_time = now
             self.status = f"Holding {translation}..."
             return self.text
 
-        # Candidate is the same, check hold duration
         held_long_enough = now - self.candidate_start_time >= self.hold_time
         cooldown_finished = now - self.last_added_time >= self.cooldown
 
@@ -157,18 +147,15 @@ class SentenceBuilder:
         return self.text
 
     def add_translation(self, translation):
-        # Open hand / B sign will act as space in this version.
-        if translation == "B":
+        if translation == "SPACE":
             if len(self.text) > 0 and not self.text.endswith(" "):
                 self.text += " "
             return
 
-        # Fist / S sign will clear the sentence.
-        if translation == "S":
+        if translation == "CLEAR":
             self.text = ""
             return
 
-        # Add normal letters
         if len(translation) == 1 and translation.isalpha():
             self.text += translation
 
@@ -188,16 +175,14 @@ def distance(point1, point2):
 
 def get_finger_states(hand_landmarks, handedness_label):
     """
-    Returns which fingers are up.
+    Returns finger states in this order:
 
-    Order:
     [thumb, index, middle, ring, pinky]
     """
     lm = hand_landmarks.landmark
 
     fingers = []
 
-    # Thumb detection
     if handedness_label == "Right":
         thumb_up = lm[4].x < lm[3].x
     else:
@@ -205,7 +190,6 @@ def get_finger_states(hand_landmarks, handedness_label):
 
     fingers.append(thumb_up)
 
-    # Other fingers
     tips = [8, 12, 16, 20]
     pips = [6, 10, 14, 18]
 
@@ -215,11 +199,50 @@ def get_finger_states(hand_landmarks, handedness_label):
     return fingers
 
 
+def is_open_hand(hand_landmarks, handedness_label):
+    fingers = get_finger_states(hand_landmarks, handedness_label)
+    return fingers == [True, True, True, True, True] or fingers == [False, True, True, True, True]
+
+
+def is_fist(hand_landmarks, handedness_label):
+    fingers = get_finger_states(hand_landmarks, handedness_label)
+    return fingers == [False, False, False, False, False]
+
+
+def detect_two_hand_command(hand_data):
+    """
+    Detects commands using two hands.
+
+    Two open hands = SPACE
+    Two fists = CLEAR
+    """
+    if len(hand_data) < 2:
+        return None
+
+    first_landmarks, first_label = hand_data[0]
+    second_landmarks, second_label = hand_data[1]
+
+    first_open = is_open_hand(first_landmarks, first_label)
+    second_open = is_open_hand(second_landmarks, second_label)
+
+    first_fist = is_fist(first_landmarks, first_label)
+    second_fist = is_fist(second_landmarks, second_label)
+
+    if first_open and second_open:
+        return "SPACE"
+
+    if first_fist and second_fist:
+        return "CLEAR"
+
+    return None
+
+
 def classify_asl_letter(hand_landmarks, handedness_label):
     """
     Basic rule-based ASL alphabet classifier.
 
-    This is a starter version, not a perfect full ASL model.
+    A-Z are included.
+    J and Z are handled separately with MotionTracker because they use movement.
     """
     lm = hand_landmarks.landmark
     fingers = get_finger_states(hand_landmarks, handedness_label)
@@ -233,7 +256,6 @@ def classify_asl_letter(hand_landmarks, handedness_label):
     pinky_tip = lm[20]
 
     index_mcp = lm[5]
-    middle_mcp = lm[9]
     ring_mcp = lm[13]
     pinky_mcp = lm[17]
 
@@ -246,68 +268,69 @@ def classify_asl_letter(hand_landmarks, handedness_label):
 
     index_middle_dist = distance(index_tip, middle_tip)
 
-    # A: fist with thumb on side
+    # A
     if fingers == [True, False, False, False, False]:
         return "A"
 
-    # B: four fingers up, thumb tucked
-    # In SentenceBuilder, B also acts as SPACE.
+    # B
     if fingers == [False, True, True, True, True]:
         return "B"
 
-    # C: curved hand shape
+    # C
     if (
         not index and not middle and not ring and not pinky
         and 0.08 < thumb_index_dist < 0.25
     ):
         return "C"
 
-    # D: index up
+    # D
     if index and not middle and not ring and not pinky:
         return "D"
 
-    # E: fingers bent down, thumb close
+    # E
     if fingers == [False, False, False, False, False] and thumb_index_dist < 0.12:
         return "E"
 
-    # F: index and thumb touch, other fingers up
+    # F
     if thumb_index_dist < 0.06 and middle and ring and pinky:
         return "F"
 
-    # G: index points sideways, thumb out
+    # G
     if index and not middle and not ring and not pinky and thumb:
         if abs(index_tip.y - index_mcp.y) < 0.12:
             return "G"
 
-    # H: index and middle sideways together
+    # H
     if index and middle and not ring and not pinky:
         if index_middle_dist < 0.08 and abs(index_tip.y - index_mcp.y) < 0.15:
             return "H"
 
-    # I: pinky up
+    # I
     if not index and not middle and not ring and pinky:
         return "I"
 
-    # K: index and middle up, thumb near middle
+    # J is handled by MotionTracker
+
+    # K
     if index and middle and not ring and not pinky and thumb:
         if thumb_middle_dist < 0.12:
             return "K"
 
-    # L: thumb and index out
+    # L
     if thumb and index and not middle and not ring and not pinky:
         return "L"
 
-    # M: closed fist-like shape
+    # M
     if fingers == [False, False, False, False, False]:
         if thumb_tip.x > index_mcp.x and thumb_tip.x < pinky_mcp.x:
             return "M"
 
-    # N: closed fist-like shape
+    # N
     if fingers == [False, False, False, False, False]:
         if thumb_tip.x > index_mcp.x and thumb_tip.x < ring_mcp.x:
             return "N"
 
-    # O: thumb and fingertips close in circle
+    # O
     if (
         thumb_index_dist < 0.08
         and thumb_middle_dist < 0.12
@@ -316,61 +339,62 @@ def classify_asl_letter(hand_landmarks, handedness_label):
     ):
         return "O"
 
-    # P: like K, but points downward
+    # P
     if index and middle and not ring and not pinky and thumb:
         if index_tip.y > wrist.y:
             return "P"
 
-    # Q: like G, but points downward
+    # Q
     if index and not middle and not ring and not pinky and thumb:
         if index_tip.y > wrist.y:
             return "Q"
 
-    # R: index and middle close/crossed
+    # R
     if index and middle and not ring and not pinky:
         if index_middle_dist < 0.04:
             return "R"
 
-    # S: fist
-    # In SentenceBuilder, S also acts as CLEAR.
+    # S
     if fingers == [False, False, False, False, False]:
         return "S"
 
-    # T: fist with thumb between index and middle
+    # T
     if fingers == [False, False, False, False, False]:
         if distance(thumb_tip, index_mcp) < 0.10:
             return "T"
 
-    # U: index and middle together
+    # U
     if index and middle and not ring and not pinky:
         if index_middle_dist < 0.08:
             return "U"
 
-    # V: index and middle spread apart
+    # V
     if index and middle and not ring and not pinky:
         if index_middle_dist >= 0.08:
             return "V"
 
-    # W: index, middle, ring up
+    # W
     if not thumb and index and middle and ring and not pinky:
         return "W"
 
-    # X: bent index hook
+    # X
     if not thumb and not middle and not ring and not pinky:
         if lm[8].y > lm[6].y and lm[6].y < lm[5].y:
             return "X"
 
-    # Y: thumb and pinky out
+    # Y
     if thumb and not index and not middle and not ring and pinky:
         return "Y"
+
+    # Z is handled by MotionTracker
 
     return "Unknown"
 
 
 def draw_text_box(frame, text):
     """
-    Keeps the original black text box style.
-    Shows: Translation: LETTER
+    Bottom black text box.
+    Shows current translation.
     """
     height, width, _ = frame.shape
 
@@ -396,7 +420,8 @@ def draw_text_box(frame, text):
 
 def draw_sentence_box(frame, sentence, status):
     """
-    Draws the built sentence at the top of the screen.
+    Top black text box.
+    Shows full sentence being built.
     """
     height, width, _ = frame.shape
 
@@ -408,10 +433,7 @@ def draw_sentence_box(frame, sentence, status):
         -1
     )
 
-    display_sentence = sentence
-
-    if display_sentence == "":
-        display_sentence = "(empty)"
+    display_sentence = sentence if sentence != "" else "(empty)"
 
     cv2.putText(
         frame,
@@ -456,17 +478,17 @@ def main():
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     print("ASL alphabet translator started.")
-    print("Hold a letter steady to lock it into the sentence.")
-    print("Hold B/open hand to add a space.")
-    print("Hold S/fist to clear the sentence.")
-    print("Press BACKSPACE to delete the last character.")
-    print("Press C to clear the sentence.")
-    print("Press Q to quit.")
+    print("Hold a letter steady to lock it in.")
+    print("Two open hands = space.")
+    print("Two fists = clear sentence.")
+    print("Backspace key = delete last character.")
+    print("C key = clear sentence.")
+    print("Q key = quit.")
 
     try:
         with mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=1,
+            max_num_hands=2,
             model_complexity=1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.7
@@ -490,6 +512,7 @@ def main():
                 rgb_frame.flags.writeable = True
 
                 current_prediction = "No Hand Detected"
+                hand_data = []
 
                 if results.multi_hand_landmarks and results.multi_handedness:
                     for hand_landmarks, handedness in zip(
@@ -497,6 +520,97 @@ def main():
                         results.multi_handedness
                     ):
                         handedness_label = handedness.classification[0].label
+                        hand_data.append((hand_landmarks, handedness_label))
+
+                        mp_drawing.draw_landmarks(
+                            frame,
+                            hand_landmarks,
+                            mp_hands.HAND_CONNECTIONS,
+                            mp_styles.get_default_hand_landmarks_style(),
+                            mp_styles.get_default_hand_connections_style()
+                        )
+
+                    two_hand_command = detect_two_hand_command(hand_data)
+
+                    if two_hand_command is not None:
+                        current_prediction = two_hand_command
+                        motion_tracker.clear()
+
+                    else:
+                        hand_landmarks, handedness_label = hand_data[0]
+
+                        motion_tracker.update(hand_landmarks)
+
+                        if motion_tracker.detect_j():
+                            current_prediction = "J"
+                            motion_tracker.clear()
+
+                        elif motion_tracker.detect_z():
+                            current_prediction = "Z"
+                            motion_tracker.clear()
+
+                        else:
+                            current_prediction = classify_asl_letter(
+                                hand_landmarks,
+                                handedness_label
+                            )
+
+                else:
+                    current_prediction = "No Hand Detected"
+                    motion_tracker.clear()
+
+                final_translation = stable_prediction.update(current_prediction)
+
+                sentence_builder.update(final_translation)
+
+                draw_sentence_box(
+                    frame,
+                    sentence_builder.text,
+                    sentence_builder.status
+                )
+
+                draw_text_box(frame, final_translation)
+
+                cv2.putText(
+                    frame,
+                    "Hold letter to type | Two open hands = Space | Two fists = Clear | Backspace = Delete | Q = Quit",
+                    (20, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (255, 255, 255),
+                    2
+                )
+
+                cv2.imshow("ASL Alphabet Translator", frame)
+
+                key = cv2.waitKey(1) & 0xFF
+
+                if key == ord("q"):
+                    break
+
+                elif key == ord("c"):
+                    sentence_builder.clear()
+                    stable_prediction.clear()
+                    motion_tracker.clear()
+
+                elif key == 8 or key == 127:
+                    sentence_builder.backspace()
+
+    except KeyboardInterrupt:
+        print("Program stopped by user.")
+
+    except Exception as error:
+        print("ERROR: Something went wrong.")
+        print(error)
+
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        print("Camera closed safely.")
+
+
+if __name__ == "__main__":
+    main()
 
                         motion_tracker.update(hand_landmarks)
 
